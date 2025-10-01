@@ -1,0 +1,3 @@
+Command: cmake -G Ninja -DPYTHON_DEPS_CHECKED=1 -DPYTHON=C:\Espressif\python_env\idf5.5_py3.11_env\Scripts\python.exe -DESP_PLATFORM=1 -DCCACHE_ENABLE=1 C:\Users\OH\ECT_OT_UDVIKLING\br_rcp
+warning: the value 'y' is invalid for SOC_TWAI_CONTROLLER_NUM (defined at C:/Espressif/frameworks/esp-idf-v5.5.1\./components/soc/esp32h2/include/soc/Kconfig.soc_caps.in:1222), which has type int -- assignment ignored
+warning: user value 68 on the int symbol LWIP_DHCP_OPTIONS_LEN (defined at C:/Espressif/frameworks/esp-idf-v5.5.1/components/lwip/Kconfig:364) ignored due to being outside the active range ([69, 255]) -- falling back on defaults
