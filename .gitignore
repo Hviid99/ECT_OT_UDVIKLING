@@ -1,1 +1,12 @@
-build*/
+# Ignorer alt
+*
+
+# behold mappen basic_thread_border_router/main og dens indhold
+!/basic_thread_border_router/
+!/basic_thread_border_router/main/
+!/basic_thread_border_router/main/**
+
+# Behold gitignore
+!.gitignore
+
+
