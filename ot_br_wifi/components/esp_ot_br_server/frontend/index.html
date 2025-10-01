@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Thread Network Monitoring Dashboard</title>
+  <link rel="stylesheet" href="static/style.css">
+  <script>
+    let alarmSilenced = false;
+
+    async function getBatteryAll() {
+      // Send BREQ ud til alle SEDs
+      await fetch("/battery_request");
+
+      // Vent lidt så SED kan nå at svare
+      await new Promise(r => setTimeout(r, 300));
+
+      // Hent seneste status og opdater cirkler
+      const response = await fetch("/battery_status");
+      const data = await response.json();
+      updateCircles(data);
+    }
+
+    function updateCircles(data) {
+      let globalAlarm = false;
+
+      for (const [sed, info] of Object.entries(data)) {
+        const circle = document.getElementById(sed + "-circle");
+        const text = document.getElementById(sed + "-text");
+
+        if (!circle || !text) continue;
+
+        text.innerHTML = `${info.voltage} mV<br>${info.status}`;
+
+        if (info.voltage >= 2100) {
+          circle.style.backgroundColor = "green";
+          circle.style.color = "white";
+        } else if (info.voltage >= 1900) {
+          circle.style.backgroundColor = "gold";
+          circle.style.color = "black";
+        } else {
+          circle.style.backgroundColor = "red";
+          circle.style.color = "white";
+        }
+
+        if (info.alarm === "on") {
+          globalAlarm = true;
+        }
+      }
+
+      if (!alarmSilenced) {
+        updateAlarmBox(globalAlarm);
+      }
+    }
+
+    function hushAlarm() {
+      alarmSilenced = true;
+      updateAlarmBox(false);
+    }
+
+    function updateAlarmBox(globalAlarm) {
+      const alarmBox = document.getElementById("global-alarm");
+      if (globalAlarm) {
+        alarmBox.textContent = "Alarm status: BRAND!!";
+        alarmBox.className = "alarm-box alarm-on";
+      } else {
+        alarmBox.textContent = "Alarm status: GOOD";
+        alarmBox.className = "alarm-box alarm-good";
+      }
+    }
+
+    // Når siden loader første gang, hent seneste kendte status
+    window.addEventListener("DOMContentLoaded", async () => {
+    // Første load
+    const response = await fetch("/battery_status");
+    const data = await response.json();
+    updateCircles(data);
+
+    setInterval(async () => {
+      const resp = await fetch("/battery_status");
+      const data = await resp.json();
+      updateCircles(data);
+    }, 5000);
+  });
+</script>
+</head>
+<body>
+  <div class="dashboard">
+    <h1>Thread Network Monitoring Dashboard</h1>
+
+    <div class="button-container">
+      <button class="btn primary" onclick="getBatteryAll()">Battery Request</button>
+      <button class="btn danger" onclick="hushAlarm()">Hush Alarm</button>
+    </div>
+
+    <div class="sed-container">
+      <div class="sed"><a href="/device.html?sed=SED1"><div id="SED1-circle" class="circle"><span id="SED1-text">---</span></div></a></div>
+      <div class="sed"><a href="/device.html?sed=SED2"><div id="SED2-circle" class="circle"><span id="SED2-text">---</span></div></a></div>
+      <div class="sed"><a href="/device.html?sed=SED3"><div id="SED3-circle" class="circle"><span id="SED3-text">---</span></div></a></div>
+      <div class="sed"><a href="/device.html?sed=SED4"><div id="SED4-circle" class="circle"><span id="SED4-text">---</span></div></a></div>
+      <div class="sed"><a href="/device.html?sed=SED5"><div id="SED5-circle" class="circle"><span id="SED5-text">---</span></div></a></div>
+      <div class="sed"><a href="/device.html?sed=SED6"><div id="SED6-circle" class="circle"><span id="SED6-text">---</span></div></a></div>
+      <div class="sed"><a href="/device.html?sed=SED7"><div id="SED7-circle" class="circle"><span id="SED7-text">---</span></div></a></div>
+      <div class="sed"><a href="/device.html?sed=SED8"><div id="SED8-circle" class="circle"><span id="SED8-text">---</span></div></a></div>
+      <div class="sed"><a href="/device.html?sed=SED9"><div id="SED9-circle" class="circle"><span id="SED9-text">---</span></div></a></div>
+    </div>
+
+    <div id="global-alarm" class="alarm-box alarm-good">Alarm status: GOOD</div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Device Details</title>
+  <link rel="stylesheet" href="static/style.css">
+  <script>
+    async function loadDevice() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const sedId = urlParams.get('sed');
+      const response = await fetch("/api/device?sed=" + sedId);
+      const data = await response.json();
+
+      document.getElementById("dev-id").textContent = data.id;
+      document.getElementById("voltage").textContent = data.voltage + " mV";
+      document.getElementById("status").textContent = data.status;
+      document.getElementById("alarm").textContent = data.alarm;
+      document.getElementById("last_seen").textContent = data.last_seen;
+      document.getElementById("location").textContent = data.location;
+
+      document.getElementById("device_type").textContent = data.thread.device_type;
+      document.getElementById("mleid").textContent = data.thread.mleid;
+      document.getElementById("rloc16").textContent = data.thread.rloc16;
+      document.getElementById("parent_id").textContent = data.thread.parent_id;
+      document.getElementById("partition_id").textContent = data.thread.partition_id;
+    }
+  </script>
+</head>
+<body onload="loadDevice()">
+  <div class="dashboard">
+    <h1>Details for <span id="dev-id">---</span></h1>
+
+    <div class="info-block">
+      <h2>General Info</h2>
+      <table>
+        <tr><th>Voltage</th><td id="voltage">---</td></tr>
+        <tr><th>Status</th><td id="status">---</td></tr>
+        <tr><th>Alarm</th><td id="alarm">---</td></tr>
+        <tr><th>Last Seen</th><td id="last_seen">---</td></tr>
+        <tr><th>Location</th><td id="location">---</td></tr>
+      </table>
+    </div>
+
+    <div class="info-block">
+      <h2>Thread Network Info</h2>
+      <table>
+        <tr><th>Device Type</th><td id="device_type">---</td></tr>
+        <tr><th>MLEID</th><td id="mleid">---</td></tr>
+        <tr><th>RLOC16</th><td id="rloc16">---</td></tr>
+        <tr><th>Parent</th><td id="parent_id">---</td></tr>
+        <tr><th>Partition ID</th><td id="partition_id">---</td></tr>
+      </table>
+    </div>
+
+    <a href="/index.html" class="btn primary">← Back to Dashboard</a>
+  </div>
+</body>
+</html>
