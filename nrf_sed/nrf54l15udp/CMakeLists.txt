@@ -8,5 +8,16 @@ target_sources(app PRIVATE src/adc.c)
 target_sources(app PRIVATE src/network.c)
 target_sources(app PRIVATE src/udp.c)
 target_sources(app PRIVATE src/usb_console.c)
+target_sources(app PRIVATE src/alarm_test.c)
+target_sources(app PRIVATE src/fire.c)
+
 
 target_include_directories(app PRIVATE include)
+
+
+
+
+
+
+
+
