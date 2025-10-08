@@ -5,6 +5,12 @@
 #include <string.h>
 #include <errno.h>
 #include <stdio.h>
+#include "fire.h"
+
+#include "alarm_test.h"
+#include <zephyr/sys/printk.h>
+#include <openthread/message.h>
+#include <openthread/udp.h>
 
 #include <openthread/thread.h>
 #include <openthread/link.h>
@@ -18,6 +24,7 @@ static otInstance *g_instance = NULL;
 
 static void udp_server_thread(void)
 {
+    
     int sock;
     struct sockaddr_in6 addr6;
     char buf[128];
@@ -55,6 +62,60 @@ static void udp_server_thread(void)
         buf[len] = '\0';
         printk("UDP received: %s\n", buf);
 
+
+        // --- ALARM flow ---
+        if (strcmp(buf, "ALARMTEST") == 0) {
+            alarm_test_trigger();
+            continue;
+        }
+
+        // --- ALERT_FIRE flow ---
+        if (strcmp(buf, "ALARM_START") == 0) {
+
+            if (fire_is_active()) {
+                printk("Already active fire alarm – ignoring broadcast\n");
+                continue;
+            }
+
+            printk("Received ALERT_FIRE broadcast – activating local siren\n");
+            fire_start();  // starter blink, men uden at sende 'fire' besked
+
+            // Send 'ALARM_ONLY' svar tilbage til Border Router
+            const char *resp_msg = "ALARM_ONLY";
+            src_addr.sin6_port = htons(RESPONSE_PORT);   // port 54321
+            int ret = zsock_sendto(sock, resp_msg, strlen(resp_msg), 0,
+                           (struct sockaddr *)&src_addr, addr_len);
+
+            if (ret < 0)
+                printk("UDP send ALARM_ONLY error: %d\n", errno);
+            else
+                printk("Sent ALARM_ONLY to Border Router\n");
+
+            continue;
+        }
+
+        
+        // --- HUSH flow ---
+        if (strcmp(buf, "HUSH") == 0) {
+            fire_stop();   // Kalder din funktion fra fire.c
+            printk("UDP received HUSH – stopping fire alarm\n");    
+            
+            // send bekræftelse tilbage til Border Router
+            const char *resp_msg = "HUSH_ACK";
+            src_addr.sin6_port = htons(RESPONSE_PORT);   // port 54321
+            int ret = zsock_sendto(sock, resp_msg, strlen(resp_msg), 0,
+                           (struct sockaddr *)&src_addr, addr_len);
+            if (ret < 0) {
+                printk("UDP send HUSH_ACK error: %d\n", errno);
+            } else {
+                printk("Sent HUSH_ACK to Border Router\n");
+            }
+
+            continue;
+        }
+
+
+        // --- BREQ flow ---
         if (strstr(buf, "BREQ")) {
             int voltage = get_battery_voltage_mv();
             battery_status_t bat_status = get_battery_status();
