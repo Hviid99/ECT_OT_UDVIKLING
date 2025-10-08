@@ -2,8 +2,11 @@
 #define FIRE_H
 
 #include <openthread/instance.h>
-
-// Init knap og UDP afsendelse
 void fire_init(otInstance *instance);
 
-#endif // FIRE_H
+// --- Tilføjet ved manglende funktions kald
+void fire_start(void);
+void fire_stop(void);
+bool fire_is_active(void);
+
+#endif
