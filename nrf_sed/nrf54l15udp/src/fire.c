@@ -9,15 +9,14 @@
 
 // Border Router IPv6-adresse og port
 // HUSK at ændre Border Router's adresse
-#define BR_IP6 "fd94:59b5:b7ee:779a:6274:9eaa:9cdd:8073"
-//#define BR_IP6 "fd78:ee93:e283:a41:ddd7:96ac:ec48:1884"
+//#define BR_IP6 "fd94:59b5:b7ee:779a:6274:9eaa:9cdd:8073"
+#define BR_IP6 "fd78:ee93:e283:a41:ddd7:96ac:ec48:1884"
 #define BR_PORT 54321
 #define TAG "FIRE"
 
 // --- Hardware konfiguration ---
 #define BUTTON_NODE DT_ALIAS(sw0)
 #define LED_NODE DT_ALIAS(led0)
-
 
 static const struct gpio_dt_spec fire_button = GPIO_DT_SPEC_GET(BUTTON_NODE, gpios);
 static const struct gpio_dt_spec fire_led = GPIO_DT_SPEC_GET(LED_NODE, gpios);
@@ -28,7 +27,6 @@ static otInstance *g_instance = NULL;
 static volatile bool fire_active = false;
 static struct k_thread fire_thread_data;
 K_THREAD_STACK_DEFINE(fire_stack_area, 512);
-
 
 // --- LED blink ---
 void fire_thread(void *a, void *b, void *c)
@@ -64,7 +62,7 @@ void fire_stop(void)
 // --- Knaphåndtering ---
 static void fire_button_pressed(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 {
-    printk("[%s] Button pressed sending FIRE!\n", TAG);
+    printk("[%s] Button pressed — sending FIRE!\n", TAG);
 
     // Start blink lokalt
     fire_start();
@@ -84,25 +82,25 @@ static void fire_button_pressed(const struct device *dev, struct gpio_callback *
     const char *msg = "fire";
     int ret = zsock_sendto(sock, msg, strlen(msg), 0,
                            (struct sockaddr *)&dest, sizeof(dest));
-    if (ret < 0)
+    if (ret < 0) {
         printk("[%s] UDP send error: %d\n", TAG, errno);
-    else
+    } else {
         printk("[%s] UDP sent: %s\n", TAG, msg);
+    }
 
     zsock_close(sock);
 }
 
 // --- Init ---
 void fire_init(otInstance *instance)
-void fire_init(void)
-
 {
-    // - mulig redundans: g_instance = instance;
+    g_instance = instance;
 
     if (!device_is_ready(fire_button.port)) {
         printk("[%s] Button device not ready\n", TAG);
         return;
     }
+
     if (!device_is_ready(fire_led.port)) {
         printk("[%s] LED device not ready\n", TAG);
         return;
@@ -123,9 +121,11 @@ void fire_init(void)
                     fire_thread, NULL, NULL, NULL,
                     5, 0, K_NO_WAIT);
 
-    printk("[%s] Button interrupt configured on pin %d\n", TAG, fire_button.pin);   
+    printk("[%s] Button interrupt configured on pin %d\n", TAG, fire_button.pin);
 }
 
-bool fire_is_active(void) {
-    return fire_active;   // din globale variabel
+// --- Aktiv-statusfunktion ---
+bool fire_is_active(void)
+{
+    return fire_active;
 }
