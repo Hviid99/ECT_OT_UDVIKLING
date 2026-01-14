@@ -35,8 +35,8 @@
 
 #define TAG "esp_ot_br"
 
-extern const uint8_t server_cert_pem_start[] asm("_binary_ca_cert_pem_start");
-extern const uint8_t server_cert_pem_end[] asm("_binary_ca_cert_pem_end");
+//extern const uint8_t server_cert_pem_start[] asm("_binary_ca_cert_pem_start");
+//extern const uint8_t server_cert_pem_end[] asm("_binary_ca_cert_pem_end");
 
 static esp_err_t init_spiffs(void)
 {
@@ -109,7 +109,7 @@ void app_main(void)
     ESP_ERROR_CHECK(mdns_init());
     ESP_ERROR_CHECK(mdns_hostname_set("esp-ot-br"));
 #if CONFIG_OPENTHREAD_CLI_OTA
-    esp_set_ota_server_cert((char *)server_cert_pem_start);
+    //esp_set_ota_server_cert((char *)server_cert_pem_start);
 #endif
 
 #if CONFIG_OPENTHREAD_BR_START_WEB
