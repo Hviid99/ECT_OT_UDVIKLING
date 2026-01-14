@@ -1,5 +1,6 @@
 #include "esp_br_web.h"
 #include "udp_br_func.h"
+#include "esp_https_server.h"
 #include "esp_check.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
@@ -20,15 +21,47 @@
 #define WEB_TAG "obtr_web"
 
 /*-----------------------------------------------------
- Note：Http Server
+ Note：Authentication
 -----------------------------------------------------*/
-typedef struct http_server_data {
+#define AUTH_STRING "Basic YWRtaW46dGVzdDEyMw=="   // "admin:test123" base64
+static const char *AUTH_TAG = "auth";
+
+static esp_err_t check_auth(httpd_req_t *req)
+{
+    char auth_value[128];
+    size_t auth_len = httpd_req_get_hdr_value_len(req, "Authorization") + 1;
+
+    if (auth_len <= 1) {
+        httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"Secure\"");
+        httpd_resp_send_err(req, HTTPD_401_UNAUTHORIZED, "Unauthorized");
+        ESP_LOGW(AUTH_TAG, "Access denied: no credentials");
+        return ESP_FAIL;
+    }
+
+    httpd_req_get_hdr_value_str(req, "Authorization", auth_value, sizeof(auth_value));
+
+    if (strcmp(auth_value, AUTH_STRING) != 0) {
+        httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"Secure\"");
+        httpd_resp_send_err(req, HTTPD_401_UNAUTHORIZED, "Unauthorized");
+        ESP_LOGW(AUTH_TAG, "Access denied: wrong credentials");
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(AUTH_TAG, "Access granted");
+    return ESP_OK;
+}
+
+
+/*-----------------------------------------------------
+ Note：Https Server
+-----------------------------------------------------*/
+typedef struct https_server_data {
     char base_path[ESP_VFS_PATH_MAX + 1]; /* the storaged file path */
-} http_server_data_t;
+} https_server_data_t;
 
 typedef struct http_server {
     httpd_handle_t handle;    /* server handle, unique */
-    http_server_data_t data;  /* data */
+    https_server_data_t data;  /* data */
     char ip[SERVER_IPV4_LEN]; /* ip */
     uint16_t port;            /* port */
 } http_server_t;
@@ -49,8 +82,11 @@ typedef struct request_url {
  Note：Tidlig deklaration
 -----------------------------------------------------*/
 static esp_err_t battery_request_handler(httpd_req_t *req);
+static esp_err_t hush_alarm_handler(httpd_req_t *req);
+static esp_err_t led_test_handler(httpd_req_t *req);
 static esp_err_t battery_status_handler(httpd_req_t *req);
 static esp_err_t device_handler(httpd_req_t *req);
+
 
 static httpd_uri_t s_resource_handlers[] = {
     {
@@ -71,6 +107,18 @@ static httpd_uri_t s_resource_handlers[] = {
     .handler = device_handler,
     .user_ctx = NULL,
     },
+    {
+    .uri = "/hush_alarm",
+    .method = HTTP_GET,
+    .handler = hush_alarm_handler,
+    .user_ctx = NULL,
+    },
+    {
+    .uri = "/led_test",
+    .method = HTTP_GET,
+    .handler = led_test_handler,
+    .user_ctx = NULL,
+    },
 };
 
 /*-----------------------------------------------------
@@ -84,12 +132,42 @@ static esp_err_t battery_request_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    send_udp_to_all_seds(instance);
+     send_udp_to_all_seds_with_payload(instance, "BREQ", "Battery request");
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, "{\"message\": \"Battery request sent\"}");
     return ESP_OK;
-}    
+}
+
+static esp_err_t hush_alarm_handler(httpd_req_t *req)
+{
+    otInstance *instance = esp_openthread_get_instance();
+    if (!instance) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "No OpenThread instance");
+        return ESP_FAIL;
+    }
+
+    send_udp_to_all_seds_with_payload(instance, "HUSH", "HUSH request");
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"message\": \"Hush request sent\"}");
+    return ESP_OK;
+}
+
+static esp_err_t led_test_handler(httpd_req_t *req)
+{
+    otInstance *instance = esp_openthread_get_instance();
+    if (!instance) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "No OpenThread instance");
+        return ESP_FAIL;
+    }
+
+    send_udp_to_all_seds_with_payload(instance, "ALARMTEST", "LED request");
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"message\": \"LED ON request sent\"}");
+    return ESP_OK;
+}
 
 static esp_err_t battery_status_handler(httpd_req_t *req)
 {
@@ -209,10 +287,20 @@ static esp_err_t httpd_resp_send_spiffs_file(httpd_req_t *req, char *path)
 
 static esp_err_t index_html_get_handler(httpd_req_t *req, char *path)
 {
+    // Tjek først, om brugeren har korrekt login (Basic Auth)
+    if (check_auth(req) != ESP_OK) {
+        // Hvis auth fejler, returneres ESP_FAIL
+        // og klienten får automatisk en 401 Unauthorized
+        return ESP_FAIL;
+    }
+
+    // Hvis auth er godkendt, send HTML-siden
+    ESP_RETURN_ON_ERROR(httpd_resp_set_type(req, "text/html"), WEB_TAG, "Failed to set http text/html type");
     ESP_RETURN_ON_ERROR(httpd_resp_send_spiffs_file(req, path), WEB_TAG, "Failed to send index html file");
     ESP_RETURN_ON_ERROR(httpd_resp_sendstr_chunk(req, NULL), WEB_TAG, "Failed to send http string chunk");
     return ESP_OK;
 }
+
 
 static esp_err_t style_css_get_handler(httpd_req_t *req, char *path)
 {
@@ -262,7 +350,7 @@ static esp_err_t default_urls_get_handler(httpd_req_t *req)
     struct http_parser_url url;
     ESP_RETURN_ON_ERROR(http_parser_parse_url(req->uri, strlen(req->uri), 0, &url), WEB_TAG, "Failed to parse url");
     reqeust_url_t info =
-        parse_request_url_information(req->uri, &url, ((http_server_data_t *)req->user_ctx)->base_path);
+        parse_request_url_information(req->uri, &url, ((https_server_data_t *)req->user_ctx)->base_path);
 
     ESP_LOGI(WEB_TAG, "-------------------------------------------");
     ESP_LOGI(WEB_TAG, "%s", info.file_name);
@@ -276,66 +364,128 @@ static esp_err_t default_urls_get_handler(httpd_req_t *req)
     }
     if (strcmp(info.file_name, "/") == 0) {
         return index_html_get_handler(req, info.file_path);
+
     } else if (strcmp(info.file_name, "/index.html") == 0) {
         return index_html_get_handler(req, info.file_path);
+
     } else if (strcmp(info.file_name, "/device.html") == 0) {
         return index_html_get_handler(req, info.file_path);
+
     } else if (strcmp(info.file_name, "/static/style.css") == 0) {
         return style_css_get_handler(req, info.file_path);
+
     } else if (strcmp(info.file_name, "/static/restful.js") == 0) {
         return script_js_get_handler(req, info.file_path);
+
     } else if (strcmp(info.file_name, "/static/bootstrap.min.css") == 0) {
         return script_js_get_handler(req, info.file_path);
-    } else if (strcmp(info.file_name, "/favicon.ico") == 0) {
-        return favicon_get_handler(req);
+
+    // --- Favicon tilføjet her ---
+    } else if (strcmp(info.file_name, "/static/favicon.ico") == 0) {
+        ESP_RETURN_ON_ERROR(httpd_resp_set_type(req, "image/x-icon"), WEB_TAG, "Failed to set favicon type");
+        ESP_RETURN_ON_ERROR(httpd_resp_send_spiffs_file(req, info.file_path), WEB_TAG, "Failed to send favicon");
+        ESP_RETURN_ON_ERROR(httpd_resp_sendstr_chunk(req, NULL), WEB_TAG, "Failed to send favicon chunk");
+        return ESP_OK;
+
+    // --- Hvis ingen af ovenstående matcher ---
+    } else {
+        ESP_LOGW(WEB_TAG, "File not found: %s", info.file_path);
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "File not found");
+        return ESP_FAIL;
     }
-    return ESP_OK;
 }
 
 
 /*-----------------------------------------------------
  Note：Server Start
 -----------------------------------------------------*/
-static httpd_handle_t *start_esp_br_http_server(const char *base_path, const char *host_ip)
+/* ==========================================================
+   HTTPS Certificate + Key (Embedded from CMakeLists.txt)
+   ========================================================== */
+
+extern const unsigned char servercert_pem_start[] asm("_binary_servercert_pem_start");
+extern const unsigned char servercert_pem_end[]   asm("_binary_servercert_pem_end");
+extern const unsigned char prvtkey_pem_start[]    asm("_binary_prvtkey_pem_start");
+extern const unsigned char prvtkey_pem_end[]      asm("_binary_prvtkey_pem_end");
+
+#define SERVER_CERT      servercert_pem_start
+#define SERVER_CERT_LEN  (servercert_pem_end - servercert_pem_start)
+#define SERVER_KEY       prvtkey_pem_start
+#define SERVER_KEY_LEN   (prvtkey_pem_end - prvtkey_pem_start)
+
+static void list_spiffs_files(const char *base_path)
 {
-    ESP_RETURN_ON_FALSE(base_path, NULL, WEB_TAG, "Invalid http server path");
+    ESP_LOGI(WEB_TAG, "Listing files in %s:", base_path);
+
+    DIR *dir = opendir(base_path);
+    if (!dir) {
+        ESP_LOGE(WEB_TAG, "Failed to open directory %s", base_path);
+        return;
+    }
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        ESP_LOGI(WEB_TAG, "  %s", entry->d_name);
+    }
+
+    closedir(dir);
+    ESP_LOGI(WEB_TAG, "Done listing files.");
+}
+
+static httpd_handle_t *start_esp_br_https_server(const char *base_path, const char *host_ip)
+{
+    ESP_RETURN_ON_FALSE(base_path, NULL, WEB_TAG, "Invalid https server path");
     strcpy(s_server.ip, host_ip);
     strlcpy(s_server.data.base_path, base_path, ESP_VFS_PATH_MAX + 1);
+    list_spiffs_files(base_path);
 
-    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = sizeof(s_resource_handlers) / sizeof(httpd_uri_t) + 2;
-    config.max_resp_headers = sizeof(s_resource_handlers) / sizeof(httpd_uri_t) + 2;
-    config.uri_match_fn = httpd_uri_match_wildcard;
-    config.stack_size = 8 * 1024;
-    s_server.port = config.server_port;
+    httpd_ssl_config_t conf = HTTPD_SSL_CONFIG_DEFAULT();
+    conf.port_secure = 443;
+    conf.servercert    = SERVER_CERT;
+    conf.servercert_len = SERVER_CERT_LEN;
+    conf.prvtkey_pem   = SERVER_KEY;
+    conf.prvtkey_len   = SERVER_KEY_LEN;
 
-    // start http_server
-    ESP_RETURN_ON_FALSE(!httpd_start(&s_server.handle, &config), NULL, WEB_TAG, "Failed to start web server");
+    // Allow wildcard URI matching (so "/*" works)
+    conf.httpd.uri_match_fn = httpd_uri_match_wildcard;
 
-    httpd_uri_t default_uris_get = {.uri = "/*", // Match all URIs of type /path/to/file
-                                    .method = HTTP_GET,
-                                    .handler = default_urls_get_handler,
-                                    .user_ctx = &s_server.data};
+
+
+    // Start HTTPS-server
+    esp_err_t ret = httpd_ssl_start(&s_server.handle, &conf);
+    if (ret != ESP_OK) {
+        ESP_LOGE(WEB_TAG, "Failed to start HTTPS server: %s", esp_err_to_name(ret));
+        return NULL;
+    }
+
+    // Registrér URI-handlers
+    httpd_uri_t default_uris_get = {
+        .uri = "/*",
+        .method = HTTP_GET,
+        .handler = default_urls_get_handler,
+        .user_ctx = &s_server.data
+    };
 
     for (int i = 0; i < sizeof(s_resource_handlers) / sizeof(httpd_uri_t); i++) {
-    httpd_register_uri_handler(s_server.handle, &s_resource_handlers[i]);}
-
+        httpd_register_uri_handler(s_server.handle, &s_resource_handlers[i]);
+    }
     httpd_register_uri_handler(s_server.handle, &default_uris_get);
 
-    // Show the login address in the console
-    ESP_LOGI(WEB_TAG, "%s\r\n", "<=======================server start========================>");
-    ESP_LOGI(WEB_TAG, "http://%s:%d/index.html\r\n", s_server.ip, s_server.port);
-    ESP_LOGI(WEB_TAG, "%s\r\n", "<===========================================================>");
+    // Info i log
+    ESP_LOGI(WEB_TAG, "%s\r\n", "<=======================HTTPS server start========================>");
+    ESP_LOGI(WEB_TAG, "https://%s:%d/index.html\r\n", s_server.ip, 443);
+    ESP_LOGI(WEB_TAG, "%s\r\n", "<=================================================================>");
 
     return s_server.handle;
 }
+
 
 void connect_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data, const char *base_path)
 {
     httpd_handle_t *server = (httpd_handle_t *)arg;
     ESP_RETURN_ON_FALSE(server, , WEB_TAG, "Http server is invalid, failed to start it");
     ESP_LOGI(WEB_TAG, "Start the web server for Openthread Border Router");
-    *server = (httpd_handle_t *)start_esp_br_http_server(base_path, s_server.ip);
+    *server = (httpd_handle_t *)start_esp_br_https_server(base_path, s_server.ip);
 }
 
 static bool is_br_web_server_started = false;
@@ -345,7 +495,7 @@ static void handler_got_ip_event(void *arg, esp_event_base_t event_base, int32_t
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         char ipv4_address[SERVER_IPV4_LEN];
         sprintf((char *)ipv4_address, IPSTR, IP2STR(&event->ip_info.ip));
-        if (start_esp_br_http_server((const char *)arg, (char *)ipv4_address) != NULL) {
+        if (start_esp_br_https_server((const char *)arg, (char *)ipv4_address) != NULL) {
             is_br_web_server_started = true;
         } else {
             ESP_LOGE(WEB_TAG, "Fail to start web server");
@@ -359,4 +509,5 @@ void esp_br_web_start(char *base_path)
 {
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &handler_got_ip_event, base_path));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, &handler_got_ip_event, base_path));
+
 }
